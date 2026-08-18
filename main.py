@@ -144,6 +144,8 @@ def normalizePostalCode(postalCode, country):
 
 
 def validateAddress(address):
+    isExpired = None
+    timestamp = None
     # If no address is provided, return an error message
     if not address:
         address['error'] = "No address provided."
@@ -151,12 +153,10 @@ def validateAddress(address):
     errorFields = []
     
     # If any of the required fields are missing, return an error message specifying which field is missing
-    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId']:
+    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId', 'timestamp']:
         if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
             errorFields.append(f"{field}")
-    if st.session_state.dateDoesntInvalidate == False:
-        if address.get('timestamp') == None or str(address.get('timestamp')).strip().lower() == "none":
-            errorFields.append("timestamp")
+
 
     if errorFields:
         missingError = "Missing required fields: " + ", ".join(errorFields)
@@ -228,6 +228,8 @@ def validateAddress(address):
             elif address.get('timestamp') and not isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
                 parsedDate = parseDate(address.get('timestamp'))
                 timestamp = parsedDate.date() if isinstance(parsedDate, datetime.datetime) else parsedDate
+            elif address.get('timestamp') and isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
+                timestamp = address.get('timestamp')
 
             if not timestamp:
                 errorFields.append(f"Timestamp {address.get('timestamp')} is not a valid date.")
@@ -236,7 +238,7 @@ def validateAddress(address):
 
             # Check if the timestamp is within the start and end date range
             if address.get('timestamp') and isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
-                isExpired = not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate)
+                isExpired = not (st.session_state.startDate <= (address.get('timestamp').date() if isinstance(address.get('timestamp'), datetime.datetime) else address.get('timestamp')) <= st.session_state.endDate)
             else:
                 isExpired = True
 
@@ -245,6 +247,7 @@ def validateAddress(address):
                 #Skip if start and end dates are the same, as this is likely a single date range
                 if not st.session_state.dateDoesntInvalidate:
                     errorFields.append(f"Timestamp {address.get('timestamp')} is not within the specified date range ({st.session_state.startDate} to {st.session_state.endDate}).")
+
         
         if errorFields:
             address['error'] = ", ".join(errorFields)
@@ -264,7 +267,7 @@ def validateAddress(address):
             'recordId': str(address.get('recordId')),
             'programId': str(address.get('programId')),
             'error': None,
-            'expired': isExpired,
+            'expired': isExpired if st.session_state.startDate != st.session_state.endDate else False
         }
         ##st.success(f"{validatedAddress['streetAddress']}, {validatedAddress['city']} {validatedAddress['state']}, {validatedAddress['postalCode']}, {validatedAddress['country']} is valid.")
         return validatedAddress
@@ -566,7 +569,9 @@ def displayResults(validList, invalidList):
                                     address[col] = st.text_input(f"Edit {col}", value=str(address[col]), key=f"valid_{col}_{valid['programId']}")
                                 else:
                                     address[col] = st.text_input(f"Edit {col}", value="", key=f"valid_{col}_{address['programId']}")
-                            if valid.get('timestamp') and isinstance(valid.get('timestamp'), datetime.date):
+                            if valid.get('timestamp') and isinstance(valid.get('timestamp'), (datetime.date, datetime.datetime)):
+                                if isinstance(valid.get('timestamp'), datetime.datetime):
+                                    valid['timestamp'] = valid.get('timestamp').date()
                                 address['timestamp'] = st.date_input("Edit timestamp", value=valid.get('timestamp') if valid.get('timestamp') else datetime.date.today(), key=f"valid_timestamp_{valid['programId']}", min_value=datetime.date(1900, 1, 1))
                             else:
                                 st.write(f"Timestamp could not be interpreted: {address['timestamp']}. Please enter a valid date.")
@@ -680,7 +685,7 @@ def saveResults(validList, invalidList):
     #Open file and load main sheet, set column widths, and add header row
     validFile = op.Workbook()
     sheet = validFile.active
-    sheet.column_dimensions['A'].width = 5
+    sheet.column_dimensions['A'].width = 10
     sheet.column_dimensions['B'].width = 22
     sheet.column_dimensions['C'].width = 15
     sheet.column_dimensions['D'].width = 15
@@ -725,7 +730,7 @@ def saveResults(validList, invalidList):
     #Open file and load main sheet, set column widths, and add header row
     invalidFile = op.Workbook()
     sheet = invalidFile.active
-    sheet.column_dimensions['A'].width = 5
+    sheet.column_dimensions['A'].width = 10
     sheet.column_dimensions['B'].width = 22
     sheet.column_dimensions['C'].width = 15
     sheet.column_dimensions['D'].width = 15
@@ -942,7 +947,10 @@ def editParamsPage():
     st.subheader("Date range for address validation")
     st.session_state.startDate = st.date_input("Start date", value=st.session_state.startDate, min_value=datetime.date(1900, 1, 1))
     st.session_state.endDate = st.date_input("End date", value=st.session_state.endDate, min_value=st.session_state.startDate)
-    st.session_state.dateDoesntInvalidate = st.checkbox("Ignore dates for file output", value=st.session_state.dateDoesntInvalidate) 
+    if st.session_state.startDate > st.session_state.endDate:
+        st.error("Start date cannot be after end date. Please select a valid date range.")
+    if st.session_state.startDate != st.session_state.endDate or st.session_state.dateDoesntInvalidate:
+        st.session_state.dateDoesntInvalidate = st.checkbox("Ignore dates for file output", value=st.session_state.dateDoesntInvalidate) 
 
     if st.session_state.startDate == st.session_state.endDate:
         st.warning("Start date and end date are the same. Date check will be skipped.")
